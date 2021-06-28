@@ -335,22 +335,34 @@
     (statement* driver conn canceled-chan)
     (prepared-statement* driver conn sql params canceled-chan)))
 
+(defn safe-sql-statement?
+  [^String sql]
+  (def sql-upper-case (str/upper-case sql))
+  (def sql-word-list (str/split sql-upper-case #"\s+"))
+  (not (or (.contains sql-word-list "INSERT") (.contains sql-word-list "UPDATE") (.contains sql-word-list "DELETE") (.contains sql-word-list "COMMIT"))))
+
 (defmethod execute-prepared-statement! :sql-jdbc
-  [_ ^PreparedStatement stmt]
-  (.executeQuery stmt))
+  [driver ^PreparedStatement stmt ^String sql]
+  (if (safe-sql-statement? sql)
+  (.executeQuery stmt)
+  (throw (ex-info (str (tru "INSERT, UPDATE, DELETE statements cannot be executed"))
+                                                                        {:sql sql :driver driver}))))
 
 (defmethod execute-statement! :sql-jdbc
   [driver ^Statement stmt ^String sql]
-  (if (.execute stmt sql)
-    (.getResultSet stmt)
-    (throw (ex-info (str (tru "Select statement did not produce a ResultSet for native query"))
-                    {:sql sql :driver driver}))))
+  (if (safe-sql-statement? sql)
+    (if (.execute stmt sql)
+      (.getResultSet stmt)
+      (throw (ex-info (str (tru "Select statement did not produce a ResultSet for native query"))
+                      {:sql sql :driver driver})))
+                      (throw (ex-info (str (tru "INSERT, UPDATE, DELETE statements cannot be executed"))
+                                                                      {:sql sql :driver driver}))))
 
 (defn- execute-statement-or-prepared-statement! ^ResultSet [driver ^Statement stmt max-rows params sql]
   (let [st (doto stmt (.setMaxRows max-rows))]
     (if (use-statement? driver params)
       (execute-statement! driver st sql)
-      (execute-prepared-statement! driver st))))
+      (execute-prepared-statement! driver st sql))))
 
 (defmethod read-column-thunk :default
   [driver ^ResultSet rs rsmeta ^long i]
